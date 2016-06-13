@@ -1,3 +1,3 @@
-# hlfd
-hierarchical learning from demonstrations
-nc 
+# IRL
+IRL on images
+

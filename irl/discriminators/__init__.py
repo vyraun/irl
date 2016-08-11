@@ -1,1 +1,5 @@
-__author__ = 'TheMaster'
+from discriminator import Discriminator
+from discriminator import DomainConfusionDiscriminator
+from discriminator import ConvDiscriminator
+from discriminator import MLPDiscriminator
+from discriminator import VelocityDiscriminator

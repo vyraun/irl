@@ -1,0 +1,5 @@
+a. Get pointmass running on gym with TRPO.
+1. Test ability of conv net to discriminate when point is different color (pathological case). Domain distinction
+2. Test ability of velocity classifier to tell samples apart when there is no domain confusion present. Just good vs bad samples. Classifier
+3. Test ability of classifier to distinguish even when domain confusion occurs.
+4. Test this classifier signal as reward signal.

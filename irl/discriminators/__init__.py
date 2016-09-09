@@ -1,5 +1,6 @@
 from discriminator import Discriminator
-from discriminator import DomainConfusionDiscriminator
+from discriminator import DomainConfusionVelocityDiscriminator
 from discriminator import ConvDiscriminator
 from discriminator import MLPDiscriminator
 from discriminator import VelocityDiscriminator
+from discriminator import DomainConfusionDiscriminator

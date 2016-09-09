@@ -1,5 +1,18 @@
-a. Get pointmass running on gym with TRPO.
-1. Test ability of conv net to discriminate when point is different color (pathological case). Domain distinction
-2. Test ability of velocity classifier to tell samples apart when there is no domain confusion present. Just good vs bad samples. Classifier
-3. Test ability of classifier to distinguish even when domain confusion occurs.
-4. Test this classifier signal as reward signal.
+Relationship between 3rd person RL and transfer/adaptation.
+
+Adaptation is when we change the environment but not the essence of the task.
+Transfer is when we change the essence of the task, and think that some previously solved task will prove useful.
+
+The core problem in adaptation is to learn an encoding (the essence of the task) that can then be
+utilized to complete the task across domains.
+The core problem in transfer is to learn modules which can be called upon at the opportune moment to complete a task.
+
+Adaptation is a subproblem of transfer? If transfer works perfectly, then it should be able to transfer accross domains.
+
+Demo --> cost (domain invar disc) ---> policy
+
+Demos --> cost (parameterized by basis)? ---> policy (parameterized by basis)
+Demos ---> costs ---> policies ---> behavioral cloning
+
+
+

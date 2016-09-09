@@ -69,12 +69,15 @@ if __name__ == '__main__':
     batch_size = 6000
     burn_in_expert = 15*batch_size
     burn_in_bad = batch_size
+    burn_in_bad = 1000000
+    burn_in_expert = 10000000
+    batch_size = 400
 
-    #gen_expert_data(expert_one_path, expert=True, camera_angle=0, burn_in=burn_in_expert,
-    #                save_steps=save_steps, batch_size=batch_size)
+    gen_expert_data(expert_one_path, expert=True, camera_angle=0, burn_in=burn_in_expert,
+                    save_steps=save_steps, batch_size=batch_size)
     #gen_expert_data(expert_two_path, expert=True, camera_angle=1,
     #                burn_in=burn_in_expert, save_steps=save_steps, batch_size=batch_size)
     #gen_expert_data(bad_one_path, expert=False, camera_angle=0, burn_in=burn_in_bad,
     #                save_steps=save_steps, batch_size=batch_size)
-    gen_expert_data(bad_two_path, expert=False, camera_angle=1, burn_in=burn_in_bad,
-                    save_steps=save_steps, batch_size=batch_size)
+    #gen_expert_data(bad_two_path, expert=False, camera_angle=1, burn_in=burn_in_bad,
+    #                save_steps=save_steps, batch_size=batch_size)

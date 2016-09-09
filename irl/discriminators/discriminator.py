@@ -4,8 +4,10 @@ from flip_gradients import flip_gradient
 
 
 class Discriminator(object):
-    def __init__(self, input_dim):
+    def __init__(self, input_dim, output_dim_class=2, output_dim_dom=None):
         self.input_dim = input_dim
+        self.output_dim_class = output_dim_class
+        self.output_dim_dom = output_dim_dom
         self.learning_rate = 0.001
         self.loss = None
         self.discrimination_logits = None
@@ -19,7 +21,7 @@ class Discriminator(object):
         init = tf.initialize_all_variables()
         self.sess.run(init)
 
-    def make_network(self, dim_input, dim_output):
+    def make_network(self, dim_input, output_dim_class, output_dim_dom):
         raise NotImplementedError
 
     def train(self, data_batch, targets_batch):
@@ -90,7 +92,7 @@ class Discriminator(object):
 class MLPDiscriminator(Discriminator):
     def __init__(self, input_dim):
         super(MLPDiscriminator, self).__init__(input_dim)
-        self.make_network(dim_input=input_dim, dim_output=2, )
+        self.make_network(dim_input=input_dim, dim_output=2)
         self.init_tf()
 
     def make_network(self, dim_input, dim_output):
@@ -332,9 +334,9 @@ class VelocityDiscriminator(Discriminator):
         return log_prob
 
 
-class DomainConfusionDiscriminator(Discriminator):
+class DomainConfusionVelocityDiscriminator(Discriminator):
     def __init__(self, input_dim):
-        super(DomainConfusionDiscriminator, self).__init__(input_dim)
+        super(DomainConfusionVelocityDiscriminator, self).__init__(input_dim)
         self.dom_targets = None
         self.dom_logits = None
         self.make_network(input_dim, [2, 2])
@@ -509,9 +511,157 @@ class DomainConfusionDiscriminator(Discriminator):
                                      feed_dict={self.nn_input[0]: data[0], self.nn_input[1]: data[1]})[0]
         return log_prob
 
-class FairVAEDiscriminator:
-    # Fair Variational Autoencoder as a discriminator.
-    def __init__(self):
-        pass
+
+class DomainConfusionDiscriminator(Discriminator):
+    def __init__(self, input_dim, output_dim_class, output_dim_dom):
+        super(DomainConfusionDiscriminator, self).__init__(input_dim)
+        self.dom_targets = None
+        self.dom_logits = None
+        self.label_accuracy = None
+        self.dom_accuracy = None
+        if output_dim_class is None:
+            output_dim_class = 2
+            output_dim_dom = 2
+        else:
+            output_dim_class = output_dim_class
+            output_dim_dom = output_dim_dom
+        self.make_network(input_dim, output_dim_class=output_dim_class, output_dim_dom=output_dim_dom)
+        self.init_tf()
+
+    def make_network(self, dim_input, output_dim_class, output_dim_dom):
+        """
+        One loss given by the class error, expert demo vs policy
+        One loss given by domain class error, which domain were the samples collected from
+        The domain class error is trained with gradient ascent, that is we destroy information useful for
+        classifying the domain from the conv layers. This helps to learn domain neutral classification.
+        """
+        n_mlp_layers = 3
+        layer_size = 128
+        dim_hidden_class = (n_mlp_layers - 1) * [layer_size]
+        dim_hidden_class.append(output_dim_class)
+        dim_hidden_dom = (n_mlp_layers - 1) * [layer_size]
+        dim_hidden_dom.append(output_dim_dom)
+        pool_size = 2
+        filter_size = 3
+        im_width = dim_input[0]
+        im_height = dim_input[1]
+        num_channels = dim_input[2]
+        num_filters = [32, 48]
+
+        # We make a velocity discriminator as before, but then use a domain discriminator with shared weights
+        # Gradient ascent is done on the domain calculations, making the network domain-blind.
+
+        nn_input_one, targets, domain_targets = self.get_input_layer(im_width, im_height, num_channels,
+                                                                     dim_output_class=output_dim_class,
+                                                                     dim_output_dom=output_dim_dom)
+
+        # we pool twice, each time reducing the image size by a factor of 2.
+        #conv_out_size = int(im_width * im_height / (pool_size * pool_size) * num_filters[1])
+        #conv_out_size = int(im_width * im_height * num_filters[1] / (2.0 * pool_size))
+        #first_dense_size = conv_out_size
+
+        # Store layers weight & bias
+        weights = {
+            'wc1': self.get_xavier_weights([filter_size, filter_size, num_channels, num_filters[0]], (pool_size, pool_size)),
+        # 5x5 conv, 1 input, 32 outputs
+            'wc2': self.get_xavier_weights([filter_size, filter_size, num_filters[0], num_filters[1]], (pool_size, pool_size)),
+        # 5x5 conv, 32 inputs, 48 outputs
+        }
+
+        biases = {
+            'bc1': self.init_bias([num_filters[0]]),
+            'bc2': self.init_bias([num_filters[1]]),
+        }
+
+        conv_layer_0_input_one = self.conv2d(img=nn_input_one, w=weights['wc1'], b=biases['bc1'])
+
+        conv_layer_0_input_one = self.max_pool(conv_layer_0_input_one, k=pool_size)
+
+        conv_layer_1_input_one = self.conv2d(img=conv_layer_0_input_one, w=weights['wc2'], b=biases['bc2'])
+
+        conv_layer_1_input_one = self.max_pool(conv_layer_1_input_one, k=pool_size)
+
+        shp = conv_layer_1_input_one.get_shape().as_list()
+        conv_out_size = shp[1]*shp[2]*shp[3]
+
+        conv_out_flat_input_one = tf.reshape(conv_layer_1_input_one, [-1, conv_out_size])
+
+        cur_top = conv_out_flat_input_one
+        in_shape = conv_out_size
+        feat_weight = self.init_weights([in_shape, layer_size], name='w_feats_one')
+        feat_bias = self.init_bias([layer_size], name='b_feats_one')
+        conv_one_features = tf.nn.relu(tf.matmul(cur_top, feat_weight) + feat_bias)
+
+        fc_output = self.get_mlp_layers(conv_one_features, n_mlp_layers, dim_hidden_class, name_prefix='targets')
+
+        class_loss = self.get_loss_layer(pred=fc_output, target_output=targets)
+
+        self.class_target = targets
+        self.nn_input = nn_input_one
+        self.discrimination_logits = fc_output
+
+        label_accuracy = tf.equal(tf.argmax(self.class_target, 1),
+                                       tf.argmax(tf.nn.softmax(self.discrimination_logits), 1))
+        self.label_accuracy = tf.reduce_mean(tf.cast(label_accuracy, tf.float32))
+
+        # Domain confusion
+
+        domain_features_flipped = flip_gradient(conv_one_features)
+
+        domain_mlp_out = self.get_mlp_layers(domain_features_flipped, n_mlp_layers, dim_hidden_dom, name_prefix='dom')
+        dom_loss = self.get_loss_layer(domain_mlp_out, domain_targets)
+        self.dom_targets = domain_targets
+        self.dom_logits = domain_mlp_out
+
+        dom_accuracy = tf.equal(tf.argmax(self.dom_targets, 1),
+                                tf.argmax(tf.nn.softmax(self.dom_logits), 1))
+        self.dom_accuracy = tf.reduce_mean(tf.cast(dom_accuracy, tf.float32))
+
+        # Final loss and optimizer
+        self.loss = dom_loss + class_loss
+        self.optimizer = self.get_optimizer(self.loss)
+
+    def get_loss_layer(self, pred, target_output):
+        cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(pred, target_output))
+        return cost
+
+    def get_optimizer(self, loss):
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(loss)
+        return optimizer
+
+    @staticmethod
+    def get_input_layer(im_width, im_height, num_channels, dim_output_dom, dim_output_class):
+        """produce the placeholder inputs that are used to run ops forward and backwards.
+        net_input: usually an observation.
+        action: mu, the ground truth actions we're trying to learn."""
+        net_input_one = tf.placeholder('float', [None, im_width, im_height, num_channels], name='nn_input_one')
+        class_targets = tf.placeholder('float', [None, dim_output_class], name='class_targets')
+        domain_targets = tf.placeholder('float', [None, dim_output_dom], name='domain_targets')
+        return net_input_one, class_targets, domain_targets
+
+    def train(self, data_batch, targets_batch):
+        class_labels = targets_batch[0]
+        domain_labels = targets_batch[1]
+        nn_input_image_one = data_batch
+        return self.sess.run([self.optimizer, self.loss], feed_dict={self.nn_input: nn_input_image_one,
+                                                                     self.dom_targets: domain_labels,
+                                                                     self.class_target: class_labels})[1]
+
+    def get_dom_accuracy(self, data, dom_labels):
+        return self.sess.run([self.dom_accuracy], feed_dict={self.nn_input: data,
+                                                             self.dom_targets: dom_labels})[0]
+
+    def get_lab_accuracy(self, data, class_labels):
+        return self.sess.run([self.label_accuracy], feed_dict={self.nn_input: data,
+                                                               self.class_target: class_labels})[0]
+
+    def __call__(self, data, softmax=True):
+        if softmax is True:
+            log_prob = self.sess.run([tf.nn.softmax(self.discrimination_logits)],
+                                     feed_dict={self.nn_input: data})[0]
+        else:
+            log_prob = self.sess.run([self.discrimination_logits],
+                                     feed_dict={self.nn_input: data})[0]
+        return log_prob
 
 
